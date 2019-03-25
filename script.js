@@ -1,6 +1,7 @@
 var fixed_row_state = [1, 2, 1, 1, 2, 2, 2];
 var slots = fixed_row_state.length;
 var layers = 4;
+var factional = [0, 0, 0];
 var layer_groups = [0, 1, 1, 2];
 var layer_colours = [
   "#844",
@@ -8,6 +9,99 @@ var layer_colours = [
   "#448"];
 var state = [];
 var selected_group = 0;
+var ongoingTouches = [];
+
+function handleStart(evt) {
+  evt.preventDefault();
+  var el = document.getElementById("game");
+  var ctx = el.getContext("2d");
+  var touches = evt.changedTouches;
+
+  for (var i = 0; i < touches.length; i++) {
+    ongoingTouches.push(copyTouch(touches[i]));
+  }
+}
+
+function handleMove(evt) {
+  evt.preventDefault();
+  var el = document.getElementById("game");
+  var ctx = el.getContext("2d");
+  var touches = evt.changedTouches;
+  for (var i = 0; i < touches.length; i++) {
+    var idx = ongoingTouchIndexById(touches[i].identifier);
+    if (idx >= 0) {
+      var start_x = ongoingTouches[idx].pageX;
+      var start_y = ongoingTouches[idx].pageY;
+      ongoingTouches.splice(idx, 1, copyTouch(touches[i]));  // swap in the new touch record
+      var move_group = -1;
+      for (var j = 0; j < layers; j++){
+        if (start_y > el.height/(layers+2) * (j+1) &&
+            start_y < el.height/(layers+2) * (j+2)){
+          move_group = layer_groups[j];
+          break;
+        }
+      }
+      if (move_group < 0) continue;
+      var moved_x = touches[i].pageX - start_x;
+      moved_x /= el.width / (slots * 2);
+      factional[move_group] += moved_x;
+      if (factional[move_group] > 2){
+        factional[move_group] -=2;
+        for (var i=0; i<slots-1; i++){
+          rotate_group(move_group);
+        }
+        resolve_state();
+      }
+      if (factional[move_group] < -2){
+        factional[move_group] +=2;
+        rotate_group(move_group);
+        resolve_state();
+      }
+    }
+  }
+}
+
+function handleEnd(evt) {
+  evt.preventDefault();
+  var el = document.getElementById("game");
+  var ctx = el.getContext("2d");
+  var touches = evt.changedTouches;
+
+  for (var i = 0; i < touches.length; i++) {
+    var idx = ongoingTouchIndexById(touches[i].identifier);
+    if (idx >= 0) {
+      ongoingTouches.splice(idx, 1);  // remove it; we're done
+      for (var j = 0; j < factional.length; j++){
+        factional[j] = 0;
+      }
+    }
+  }
+}
+
+function handleCancel(evt) {
+  evt.preventDefault();
+  console.log("touchcancel.");
+  var touches = evt.changedTouches;
+
+  for (var i = 0; i < touches.length; i++) {
+    var idx = ongoingTouchIndexById(touches[i].identifier);
+    ongoingTouches.splice(idx, 1);  // remove it; we're done
+  }
+}
+
+function copyTouch(touch) {
+  return { identifier: touch.identifier, pageX: touch.pageX, pageY: touch.pageY };
+}
+
+function ongoingTouchIndexById(idToFind) {
+  for (var i = 0; i < ongoingTouches.length; i++) {
+    var id = ongoingTouches[i].identifier;
+    if (id == idToFind) {
+      return i;
+    }
+  }
+  return -1;    // not found
+}
 
 var pattern = document.createElement("canvas");
 
@@ -121,11 +215,16 @@ function draw_pattern(ctx){
   pctx.stroke();
   ctx.fillStyle = ctx.createPattern(pattern,"repeat");
 }
+
 function setup(){
   var c = document.getElementById("game");
   window.addEventListener('keydown', keyDownEvent, false);
   window.addEventListener('keyup', keyUpEvent, false);
   window.addEventListener('resize', resizeCanvas, false);
+  window.addEventListener("touchstart", handleStart, false);
+  window.addEventListener("touchend", handleEnd, false);
+  window.addEventListener("touchcancel", handleCancel, false);
+  window.addEventListener("touchmove", handleMove, false);
   setInterval(function() {
     update();
     draw();
@@ -158,13 +257,16 @@ function draw(){
     ctx.fillRect(0,c.height/(layers+2)*(i+1),c.width,c.height/(layers+2));
   }
   for (var i=0; i<layers; i++){
-    for (var j=0; j<slots; j++){
-      var ix = get_index(i, j);
+    for (var j=-1; j<=slots; j++){
       var h = c.height / (layers + 2);
       var w = c.width / (slots * 2);
       var y = h * (i + 1);
-      var x = w * j * 2 + w / 2;
+      var x = w * j * 2 + w / 2 + w * factional[layer_groups[i]];
 
+      var tj = j;
+      if (tj < 0) tj = slots - 1;
+      if (tj >= slots) tj = 0;
+      var ix = get_index(i, tj);
       switch (state[ix]){
         case 0:
           ctx.fillStyle = "#333";
